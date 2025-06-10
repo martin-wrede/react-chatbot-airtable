@@ -1,5 +1,5 @@
 // functions/ai-airtable.js
-
+// mit bot_anwswer 
 export async function onRequest(context) {
   const { request, env } = context;
   
@@ -173,10 +173,10 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     // Log if the response mentions files
     console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
 
-    // ✅ Save to Airtable with both prompt, bot answer, and file attachments
+    // ✅ Save to Airtable with both prompt and bot answer
     try {
       await saveToAirtable(env, message, botAnswer, files);
-      console.log("Successfully saved to Airtable with bot answer and file attachments");
+      console.log("Successfully saved to Airtable with bot answer");
     } catch (airtableError) {
       console.error("Airtable save failed:", airtableError);
       // Continue with AI response even if Airtable fails
@@ -208,16 +208,7 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
   }
 }
 
-// ✅ Function to convert file content to base64 data URL for Airtable
-function createFileDataURL(fileName, content) {
-  // Convert text content to base64
-  const base64Content = btoa(unescape(encodeURIComponent(content)));
-  
-  // Create data URL with proper MIME type for text files
-  return `data:text/plain;base64,${base64Content}`;
-}
-
-// ✅ Enhanced Airtable Integration Function with Bot Answer and File Attachments
+// ✅ Enhanced Airtable Integration Function with Bot Answer
 async function saveToAirtable(env, originalMessage, botAnswer, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
@@ -238,15 +229,6 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
   // Clean up bot answer - remove any potential formatting issues
   const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, '\n').trim();
 
-  // ✅ Prepare file attachments for Airtable
-  const fileAttachments = files.map(file => ({
-    url: createFileDataURL(file.name, file.content),
-    filename: file.name,
-    type: "text/plain"
-  }));
-
-  console.log("Preparing file attachments:", fileAttachments.length);
-
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   
   const recordData = {
@@ -254,13 +236,13 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
       {
         fields: {
           "Prompt": userPrompt,
-          "Bot Answer": cleanBotAnswer,
+          "Bot_Answer": cleanBotAnswer,
           "Timestamp": new Date().toISOString(),
+          // Optional: Add metadata fields
+          "Has_Files": files.length > 0,
           "File_Count": files.length,
-          // Add file attachments if any exist
-  ///        ...(fileAttachments.length > 0 && {
-   ///         "File_Attachments": fileAttachments
-   ///       })
+          "Response_Length": cleanBotAnswer.length,
+          "Prompt_Length": userPrompt.length
         }
       }
     ]
@@ -270,108 +252,8 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
     url: airtableUrl,
     promptLength: userPrompt.length,
     botAnswerLength: cleanBotAnswer.length,
-    hasFiles: files.length > 0,
-    fileAttachments: fileAttachments.length
+    hasFiles: files.length > 0
   });
-
-  const response = await fetch(airtableUrl, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(recordData),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Airtable API Error:", response.status, errorText);
-    
-    // If file upload fails, try saving without attachments
-    if (response.status === 422 && files.length > 0) {
-      console.log("Retrying without file attachments...");
-      const fallbackData = {
-        records: [
-          {
-            fields: {
-              "Prompt": userPrompt,
-              "Bot Answer": cleanBotAnswer,
-              "Timestamp": new Date().toISOString(),
-              "File_Count": files.length,
-              // Add file names as text instead of attachments
-              "File_Names": files.map(f => f.name).join(", ")
-            }
-          }
-        ]
-      };
-      
-      const fallbackResponse = await fetch(airtableUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(fallbackData),
-      });
-      
-      if (fallbackResponse.ok) {
-        const fallbackResult = await fallbackResponse.json();
-        console.log("Airtable save successful (without file attachments):", fallbackResult);
-        return fallbackResult;
-      }
-    }
-    
-    throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
-  }
-
-  const result = await response.json();
-  console.log("Airtable save successful:", result);
-  return result;
-}
-
-// ✅ Alternative function for uploading files via URL (if you have a file hosting service)
-async function saveToAirtableWithFileURLs(env, originalMessage, botAnswer, files, fileUrls = []) {
-  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
-  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
-  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
-
-  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
-    throw new Error("Missing Airtable credentials");
-  }
-
-  // Extract just the user's original prompt (without file content)
-  let userPrompt = originalMessage;
-  
-  if (originalMessage.includes("[Uploaded Files Context:]")) {
-    userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
-  }
-
-  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, '\n').trim();
-
-  // Prepare file attachments using external URLs
-  const fileAttachments = fileUrls.map((url, index) => ({
-    url: url,
-    filename: files[index]?.name || `file_${index + 1}.txt`,
-    type: "text/plain"
-  }));
-
-  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
-  
-  const recordData = {
-    records: [
-      {
-        fields: {
-          "Prompt": userPrompt,
-          "Bot Answer": cleanBotAnswer,
-          "Timestamp": new Date().toISOString(),
-          "File_Count": files.length,
-          ...(fileAttachments.length > 0 && {
-            "File_Attachments": fileAttachments
-          })
-        }
-      }
-    ]
-  };
 
   const response = await fetch(airtableUrl, {
     method: "POST",
@@ -389,12 +271,12 @@ async function saveToAirtableWithFileURLs(env, originalMessage, botAnswer, files
   }
 
   const result = await response.json();
-  console.log("Airtable save successful with file URLs:", result);
+  console.log("Airtable save successful:", result);
   return result;
 }
 
-// ✅ Optional: Function to update an existing record
-async function updateAirtableRecord(env, recordId, botAnswer, files = []) {
+// ✅ Optional: Function to update an existing record with bot answer
+async function updateAirtableRecord(env, recordId, botAnswer) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
@@ -407,23 +289,11 @@ async function updateAirtableRecord(env, recordId, botAnswer, files = []) {
   
   const updateData = {
     fields: {
-      "Bot Answer": botAnswer,
+      "Bot_Answer": botAnswer,
       "Response_Length": botAnswer.length,
       "Updated_At": new Date().toISOString()
     }
   };
-
-  // Add file attachments if provided
-  if (files.length > 0) {
-    const fileAttachments = files.map(file => ({
-      url: createFileDataURL(file.name, file.content),
-      filename: file.name,
-      type: "text/plain"
-    }));
-    
-    updateData.fields["File_Attachments"] = fileAttachments;
-    updateData.fields["File_Count"] = files.length;
-  }
 
   const response = await fetch(airtableUrl, {
     method: "PATCH",
@@ -485,9 +355,8 @@ async function getChatHistory(env, maxRecords = 100) {
     prompt: record.fields.Prompt,
     botAnswer: record.fields['Bot Answer'],
     timestamp: record.fields.Timestamp,
+    hasFiles: record.fields.Has_Files || false,
     fileCount: record.fields.File_Count || 0,
-//   fileAttachments: record.fields.File_Attachments || [],
-    fileNames: record.fields.File_Names || "",
     createdTime: record.createdTime
   }));
   

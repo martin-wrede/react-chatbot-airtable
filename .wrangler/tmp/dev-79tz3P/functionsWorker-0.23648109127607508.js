@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// ../.wrangler/tmp/bundle-xXJVhp/checked-fetch.js
+// .wrangler/tmp/bundle-kOuRoP/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -27,7 +27,34 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
-// ai-airtable.js
+// .wrangler/tmp/pages-Ao1XNS/functionsWorker-0.23648109127607508.mjs
+var __defProp2 = Object.defineProperty;
+var __name2 = /* @__PURE__ */ __name((target, value) => __defProp2(target, "name", { value, configurable: true }), "__name");
+var urls2 = /* @__PURE__ */ new Set();
+function checkURL2(request, init) {
+  const url = request instanceof URL ? request : new URL(
+    (typeof request === "string" ? new Request(request, init) : request).url
+  );
+  if (url.port && url.port !== "443" && url.protocol === "https:") {
+    if (!urls2.has(url.toString())) {
+      urls2.add(url.toString());
+      console.warn(
+        `WARNING: known issue with \`fetch()\` requests to custom HTTPS ports in published Workers:
+ - ${url.toString()} - the custom port will be ignored when the Worker is published using the \`wrangler deploy\` command.
+`
+      );
+    }
+  }
+}
+__name(checkURL2, "checkURL");
+__name2(checkURL2, "checkURL");
+globalThis.fetch = new Proxy(globalThis.fetch, {
+  apply(target, thisArg, argArray) {
+    const [request, init] = argArray;
+    checkURL2(request, init);
+    return Reflect.apply(target, thisArg, argArray);
+  }
+});
 async function onRequest(context) {
   const { request, env } = context;
   console.log("=== AI Function Called ===");
@@ -96,12 +123,6 @@ async function onRequest(context) {
           }
         }
       );
-    }
-    try {
-      await saveToAirtable(env, message, files);
-      console.log("Successfully saved to Airtable");
-    } catch (airtableError) {
-      console.error("Airtable save failed:", airtableError);
     }
     let systemPrompt = "Du bist ein hilfsreicher AI-Assistent. Antworte h\xF6flich und informativ auf Deutsch.";
     if (files.length > 0) {
@@ -173,8 +194,14 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     }
     const data = await apiResponse.json();
     console.log("OpenAI Response received successfully");
-    const responseContent = data.choices?.[0]?.message?.content || "";
-    console.log("Response mentions files:", responseContent.toLowerCase().includes("datei"));
+    const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
+    console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
+    try {
+      await saveToAirtable(env, message, botAnswer, files);
+      console.log("Successfully saved to Airtable with bot answer");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+    }
     return new Response(JSON.stringify(data), {
       status: 200,
       headers: {
@@ -201,7 +228,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
   }
 }
 __name(onRequest, "onRequest");
-async function saveToAirtable(env, originalMessage, files) {
+__name2(onRequest, "onRequest");
+async function saveToAirtable(env, originalMessage, botAnswer, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
@@ -212,15 +240,20 @@ async function saveToAirtable(env, originalMessage, files) {
   if (originalMessage.includes("[Uploaded Files Context:]")) {
     userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
   }
+  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, "\n").trim();
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   const recordData = {
     records: [
       {
         fields: {
           "Prompt": userPrompt,
+          "Bot_Answer": cleanBotAnswer,
           "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
-          //   "Has_Files": files.length > 0,
+          // Optional: Add metadata fields
+          //    "Has_Files": files.length > 0,
           "File_Count": files.length
+          //   "Response_Length": cleanBotAnswer.length,
+          //   "Prompt_Length": userPrompt.length
         }
       }
     ]
@@ -228,6 +261,7 @@ async function saveToAirtable(env, originalMessage, files) {
   console.log("Saving to Airtable:", {
     url: airtableUrl,
     promptLength: userPrompt.length,
+    botAnswerLength: cleanBotAnswer.length,
     hasFiles: files.length > 0
   });
   const response = await fetch(airtableUrl, {
@@ -248,8 +282,7 @@ async function saveToAirtable(env, originalMessage, files) {
   return result;
 }
 __name(saveToAirtable, "saveToAirtable");
-
-// ai-airtable copy 2.js
+__name2(saveToAirtable, "saveToAirtable");
 async function onRequest2(context) {
   const { request, env } = context;
   console.log("=== AI Function Called ===");
@@ -393,7 +426,7 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
     try {
       await saveToAirtable2(env, message, botAnswer, files);
-      console.log("Successfully saved to Airtable with bot answer and file attachments");
+      console.log("Successfully saved to Airtable with bot answer");
     } catch (airtableError) {
       console.error("Airtable save failed:", airtableError);
     }
@@ -422,12 +455,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     });
   }
 }
-__name(onRequest2, "onRequest");
-function createFileDataURL(fileName, content) {
-  const base64Content = btoa(unescape(encodeURIComponent(content)));
-  return `data:text/plain;base64,${base64Content}`;
-}
-__name(createFileDataURL, "createFileDataURL");
+__name(onRequest2, "onRequest2");
+__name2(onRequest2, "onRequest");
 async function saveToAirtable2(env, originalMessage, botAnswer, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
@@ -440,12 +469,6 @@ async function saveToAirtable2(env, originalMessage, botAnswer, files) {
     userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
   }
   const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, "\n").trim();
-  const fileAttachments = files.map((file) => ({
-    url: createFileDataURL(file.name, file.content),
-    filename: file.name,
-    type: "text/plain"
-  }));
-  console.log("Preparing file attachments:", fileAttachments.length);
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   const recordData = {
     records: [
@@ -454,11 +477,11 @@ async function saveToAirtable2(env, originalMessage, botAnswer, files) {
           "Prompt": userPrompt,
           "Bot Answer": cleanBotAnswer,
           "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+          // Optional: Add metadata fields
+          //    "Has_Files": files.length > 0,
           "File_Count": files.length
-          // Add file attachments if any exist
-          ///        ...(fileAttachments.length > 0 && {
-          ///         "File_Attachments": fileAttachments
-          ///       })
+          //   "Response_Length": cleanBotAnswer.length,
+          //   "Prompt_Length": userPrompt.length
         }
       }
     ]
@@ -467,8 +490,7 @@ async function saveToAirtable2(env, originalMessage, botAnswer, files) {
     url: airtableUrl,
     promptLength: userPrompt.length,
     botAnswerLength: cleanBotAnswer.length,
-    hasFiles: files.length > 0,
-    fileAttachments: fileAttachments.length
+    hasFiles: files.length > 0
   });
   const response = await fetch(airtableUrl, {
     method: "POST",
@@ -481,45 +503,14 @@ async function saveToAirtable2(env, originalMessage, botAnswer, files) {
   if (!response.ok) {
     const errorText = await response.text();
     console.error("Airtable API Error:", response.status, errorText);
-    if (response.status === 422 && files.length > 0) {
-      console.log("Retrying without file attachments...");
-      const fallbackData = {
-        records: [
-          {
-            fields: {
-              "Prompt": userPrompt,
-              "Bot Answer": cleanBotAnswer,
-              "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
-              "File_Count": files.length,
-              // Add file names as text instead of attachments
-              "File_Names": files.map((f) => f.name).join(", ")
-            }
-          }
-        ]
-      };
-      const fallbackResponse = await fetch(airtableUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(fallbackData)
-      });
-      if (fallbackResponse.ok) {
-        const fallbackResult = await fallbackResponse.json();
-        console.log("Airtable save successful (without file attachments):", fallbackResult);
-        return fallbackResult;
-      }
-    }
     throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
   }
   const result = await response.json();
   console.log("Airtable save successful:", result);
   return result;
 }
-__name(saveToAirtable2, "saveToAirtable");
-
-// ai-airtable-bestversion.js
+__name(saveToAirtable2, "saveToAirtable2");
+__name2(saveToAirtable2, "saveToAirtable");
 async function onRequest3(context) {
   const { request, env } = context;
   console.log("=== AI Function Called ===");
@@ -692,7 +683,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     });
   }
 }
-__name(onRequest3, "onRequest");
+__name(onRequest3, "onRequest3");
+__name2(onRequest3, "onRequest");
 async function saveToAirtable3(env, originalMessage, botAnswer, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
@@ -711,13 +703,13 @@ async function saveToAirtable3(env, originalMessage, botAnswer, files) {
       {
         fields: {
           "Prompt": userPrompt,
-          "Bot Answer": cleanBotAnswer,
+          "Bot_Answer": cleanBotAnswer,
           "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
           // Optional: Add metadata fields
-          //    "Has_Files": files.length > 0,
-          "File_Count": files.length
-          //   "Response_Length": cleanBotAnswer.length,
-          //   "Prompt_Length": userPrompt.length
+          "Has_Files": files.length > 0,
+          "File_Count": files.length,
+          "Response_Length": cleanBotAnswer.length,
+          "Prompt_Length": userPrompt.length
         }
       }
     ]
@@ -745,9 +737,230 @@ async function saveToAirtable3(env, originalMessage, botAnswer, files) {
   console.log("Airtable save successful:", result);
   return result;
 }
-__name(saveToAirtable3, "saveToAirtable");
-
-// ../.wrangler/tmp/pages-76HKgf/functionsRoutes-0.18581218463115157.mjs
+__name(saveToAirtable3, "saveToAirtable3");
+__name2(saveToAirtable3, "saveToAirtable");
+async function onRequest4(context) {
+  const { request, env } = context;
+  console.log("=== AI Function Called ===");
+  console.log("Method:", request.method);
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    });
+  }
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: `Method ${request.method} not allowed` }), {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+  try {
+    const body = await request.text();
+    console.log("Raw request body length:", body.length);
+    if (!body) {
+      return new Response(
+        JSON.stringify({ error: "Empty request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    let parsedBody;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch (e) {
+      console.error("JSON Parse Error:", e);
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON in request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    console.log("Request contains files:", parsedBody.files?.length || 0);
+    console.log("Message length:", parsedBody.message?.length || 0);
+    const { message, messages = [], files = [] } = parsedBody;
+    if (!message) {
+      return new Response(
+        JSON.stringify({ error: "Missing 'message' field" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    try {
+      await saveToAirtable4(env, message, files);
+      console.log("Successfully saved to Airtable");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+    }
+    let systemPrompt = "Du bist ein hilfsreicher AI-Assistent. Antworte h\xF6flich und informativ auf Deutsch.";
+    if (files.length > 0) {
+      systemPrompt += ` 
+      
+WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Dateien sind im Nachrichteninhalt unter "[Uploaded Files Context:]" zu finden. 
+- Lies und analysiere den Inhalt dieser Dateien sorgf\xE4ltig
+- Beziehe dich direkt auf den Dateiinhalt in deinen Antworten
+- Wenn der Benutzer Fragen zu den Dateien stellt, zitiere relevante Teile daraus
+- Best\xE4tige explizit, dass du die Dateien gelesen hast`;
+    }
+    const chatMessages = [
+      {
+        role: "system",
+        content: systemPrompt
+      }
+    ];
+    if (messages.length > 0) {
+      const historyMessages = messages.slice(0, -1).map((msg) => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      chatMessages.push(...historyMessages);
+    }
+    chatMessages.push({
+      role: "user",
+      content: message
+    });
+    console.log("=== DEBUG: Final message to OpenAI ===");
+    console.log("System prompt:", systemPrompt);
+    console.log("Total messages:", chatMessages.length);
+    console.log("Current message preview:", message.substring(0, 500) + "...");
+    console.log("=====================================");
+    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.VITE_APP_OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo",
+        messages: chatMessages,
+        max_tokens: files.length > 0 ? 2e3 : 1e3,
+        // More tokens when files are involved
+        temperature: 0.7
+      })
+    });
+    if (!apiResponse.ok) {
+      const errorText = await apiResponse.text();
+      console.error("OpenAI API Error:", apiResponse.status, errorText);
+      if (errorText.includes("context_length_exceeded")) {
+        return new Response(JSON.stringify({
+          error: "Die hochgeladenen Dateien sind zu gro\xDF. Bitte verwende kleinere Dateien oder teile sie auf.",
+          choices: [{
+            message: {
+              content: "Entschuldigung, die hochgeladenen Dateien sind zu gro\xDF f\xFCr die Verarbeitung. Bitte verwende kleinere Dateien oder teile sie in mehrere kleinere Dateien auf."
+            }
+          }]
+        }), {
+          status: 200,
+          // Return 200 so frontend handles it normally
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
+      throw new Error(`OpenAI API Error: ${apiResponse.status} - ${errorText}`);
+    }
+    const data = await apiResponse.json();
+    console.log("OpenAI Response received successfully");
+    const responseContent = data.choices?.[0]?.message?.content || "";
+    console.log("Response mentions files:", responseContent.toLowerCase().includes("datei"));
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  } catch (error) {
+    console.error("Error in AI function:", error);
+    return new Response(JSON.stringify({
+      error: error.message,
+      choices: [{
+        message: {
+          content: "Entschuldigung, es gab einen technischen Fehler. Bitte versuche es erneut."
+        }
+      }]
+    }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+}
+__name(onRequest4, "onRequest4");
+__name2(onRequest4, "onRequest");
+async function saveToAirtable4(env, originalMessage, files) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  let userPrompt = originalMessage;
+  if (originalMessage.includes("[Uploaded Files Context:]")) {
+    userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+  const recordData = {
+    records: [
+      {
+        fields: {
+          "Prompt": userPrompt,
+          "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+          //   "Has_Files": files.length > 0,
+          "File_Count": files.length
+        }
+      }
+    ]
+  };
+  console.log("Saving to Airtable:", {
+    url: airtableUrl,
+    promptLength: userPrompt.length,
+    hasFiles: files.length > 0
+  });
+  const response = await fetch(airtableUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(recordData)
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable API Error:", response.status, errorText);
+    throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable save successful:", result);
+  return result;
+}
+__name(saveToAirtable4, "saveToAirtable4");
+__name2(saveToAirtable4, "saveToAirtable");
 var routes = [
   {
     routePath: "/ai-airtable",
@@ -757,22 +970,27 @@ var routes = [
     modules: [onRequest]
   },
   {
-    routePath: "/ai-airtable copy 2",
+    routePath: "/ai-airtable-bestversion",
     mountPath: "/",
     method: "",
     middlewares: [],
     modules: [onRequest2]
   },
   {
-    routePath: "/ai-airtable-bestversion",
+    routePath: "/ai-airtable-botanswer",
     mountPath: "/",
     method: "",
     middlewares: [],
     modules: [onRequest3]
+  },
+  {
+    routePath: "/ai-airtable-start",
+    mountPath: "/",
+    method: "",
+    middlewares: [],
+    modules: [onRequest4]
   }
 ];
-
-// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/node_modules/path-to-regexp/dist.es2015/index.js
 function lexer(str) {
   var tokens = [];
   var i = 0;
@@ -857,6 +1075,7 @@ function lexer(str) {
   return tokens;
 }
 __name(lexer, "lexer");
+__name2(lexer, "lexer");
 function parse(str, options) {
   if (options === void 0) {
     options = {};
@@ -867,18 +1086,18 @@ function parse(str, options) {
   var key = 0;
   var i = 0;
   var path = "";
-  var tryConsume = /* @__PURE__ */ __name(function(type) {
+  var tryConsume = /* @__PURE__ */ __name2(function(type) {
     if (i < tokens.length && tokens[i].type === type)
       return tokens[i++].value;
   }, "tryConsume");
-  var mustConsume = /* @__PURE__ */ __name(function(type) {
+  var mustConsume = /* @__PURE__ */ __name2(function(type) {
     var value2 = tryConsume(type);
     if (value2 !== void 0)
       return value2;
     var _a2 = tokens[i], nextType = _a2.type, index = _a2.index;
     throw new TypeError("Unexpected ".concat(nextType, " at ").concat(index, ", expected ").concat(type));
   }, "mustConsume");
-  var consumeText = /* @__PURE__ */ __name(function() {
+  var consumeText = /* @__PURE__ */ __name2(function() {
     var result2 = "";
     var value2;
     while (value2 = tryConsume("CHAR") || tryConsume("ESCAPED_CHAR")) {
@@ -886,7 +1105,7 @@ function parse(str, options) {
     }
     return result2;
   }, "consumeText");
-  var isSafe = /* @__PURE__ */ __name(function(value2) {
+  var isSafe = /* @__PURE__ */ __name2(function(value2) {
     for (var _i = 0, delimiter_1 = delimiter; _i < delimiter_1.length; _i++) {
       var char2 = delimiter_1[_i];
       if (value2.indexOf(char2) > -1)
@@ -894,7 +1113,7 @@ function parse(str, options) {
     }
     return false;
   }, "isSafe");
-  var safePattern = /* @__PURE__ */ __name(function(prefix2) {
+  var safePattern = /* @__PURE__ */ __name2(function(prefix2) {
     var prev = result[result.length - 1];
     var prevText = prefix2 || (prev && typeof prev === "string" ? prev : "");
     if (prev && !prevText) {
@@ -957,12 +1176,14 @@ function parse(str, options) {
   return result;
 }
 __name(parse, "parse");
+__name2(parse, "parse");
 function match(str, options) {
   var keys = [];
   var re = pathToRegexp(str, keys, options);
   return regexpToFunction(re, keys, options);
 }
 __name(match, "match");
+__name2(match, "match");
 function regexpToFunction(re, keys, options) {
   if (options === void 0) {
     options = {};
@@ -976,7 +1197,7 @@ function regexpToFunction(re, keys, options) {
       return false;
     var path = m[0], index = m.index;
     var params = /* @__PURE__ */ Object.create(null);
-    var _loop_1 = /* @__PURE__ */ __name(function(i2) {
+    var _loop_1 = /* @__PURE__ */ __name2(function(i2) {
       if (m[i2] === void 0)
         return "continue";
       var key = keys[i2 - 1];
@@ -995,14 +1216,17 @@ function regexpToFunction(re, keys, options) {
   };
 }
 __name(regexpToFunction, "regexpToFunction");
+__name2(regexpToFunction, "regexpToFunction");
 function escapeString(str) {
   return str.replace(/([.+*?=^!:${}()[\]|/\\])/g, "\\$1");
 }
 __name(escapeString, "escapeString");
+__name2(escapeString, "escapeString");
 function flags(options) {
   return options && options.sensitive ? "" : "i";
 }
 __name(flags, "flags");
+__name2(flags, "flags");
 function regexpToRegexp(path, keys) {
   if (!keys)
     return path;
@@ -1023,6 +1247,7 @@ function regexpToRegexp(path, keys) {
   return path;
 }
 __name(regexpToRegexp, "regexpToRegexp");
+__name2(regexpToRegexp, "regexpToRegexp");
 function arrayToRegexp(paths, keys, options) {
   var parts = paths.map(function(path) {
     return pathToRegexp(path, keys, options).source;
@@ -1030,10 +1255,12 @@ function arrayToRegexp(paths, keys, options) {
   return new RegExp("(?:".concat(parts.join("|"), ")"), flags(options));
 }
 __name(arrayToRegexp, "arrayToRegexp");
+__name2(arrayToRegexp, "arrayToRegexp");
 function stringToRegexp(path, keys, options) {
   return tokensToRegexp(parse(path, options), keys, options);
 }
 __name(stringToRegexp, "stringToRegexp");
+__name2(stringToRegexp, "stringToRegexp");
 function tokensToRegexp(tokens, keys, options) {
   if (options === void 0) {
     options = {};
@@ -1089,6 +1316,7 @@ function tokensToRegexp(tokens, keys, options) {
   return new RegExp(route, flags(options));
 }
 __name(tokensToRegexp, "tokensToRegexp");
+__name2(tokensToRegexp, "tokensToRegexp");
 function pathToRegexp(path, keys, options) {
   if (path instanceof RegExp)
     return regexpToRegexp(path, keys);
@@ -1097,8 +1325,7 @@ function pathToRegexp(path, keys, options) {
   return stringToRegexp(path, keys, options);
 }
 __name(pathToRegexp, "pathToRegexp");
-
-// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/pages-template-worker.ts
+__name2(pathToRegexp, "pathToRegexp");
 var escapeRegex = /[.+?^${}()|[\]\\]/g;
 function* executeRequest(request) {
   const requestPath = new URL(request.url).pathname;
@@ -1149,13 +1376,14 @@ function* executeRequest(request) {
   }
 }
 __name(executeRequest, "executeRequest");
+__name2(executeRequest, "executeRequest");
 var pages_template_worker_default = {
   async fetch(originalRequest, env, workerContext) {
     let request = originalRequest;
     const handlerIterator = executeRequest(request);
     let data = {};
     let isFailOpen = false;
-    const next = /* @__PURE__ */ __name(async (input, init) => {
+    const next = /* @__PURE__ */ __name2(async (input, init) => {
       if (input !== void 0) {
         let url = input;
         if (typeof input === "string") {
@@ -1182,7 +1410,7 @@ var pages_template_worker_default = {
           },
           env,
           waitUntil: workerContext.waitUntil.bind(workerContext),
-          passThroughOnException: /* @__PURE__ */ __name(() => {
+          passThroughOnException: /* @__PURE__ */ __name2(() => {
             isFailOpen = true;
           }, "passThroughOnException")
         };
@@ -1210,16 +1438,14 @@ var pages_template_worker_default = {
     }
   }
 };
-var cloneResponse = /* @__PURE__ */ __name((response) => (
+var cloneResponse = /* @__PURE__ */ __name2((response) => (
   // https://fetch.spec.whatwg.org/#null-body-status
   new Response(
     [101, 204, 205, 304].includes(response.status) ? null : response.body,
     response
   )
 ), "cloneResponse");
-
-// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
-var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+var drainBody = /* @__PURE__ */ __name2(async (request, env, _ctx, middlewareCtx) => {
   try {
     return await middlewareCtx.next(request, env);
   } finally {
@@ -1235,8 +1461,6 @@ var drainBody = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
   }
 }, "drainBody");
 var middleware_ensure_req_body_drained_default = drainBody;
-
-// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
 function reduceError(e) {
   return {
     name: e?.name,
@@ -1246,7 +1470,8 @@ function reduceError(e) {
   };
 }
 __name(reduceError, "reduceError");
-var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+__name2(reduceError, "reduceError");
+var jsonError = /* @__PURE__ */ __name2(async (request, env, _ctx, middlewareCtx) => {
   try {
     return await middlewareCtx.next(request, env);
   } catch (e) {
@@ -1258,20 +1483,17 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
   }
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
-
-// ../.wrangler/tmp/bundle-xXJVhp/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
 ];
 var middleware_insertion_facade_default = pages_template_worker_default;
-
-// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/common.ts
 var __facade_middleware__ = [];
 function __facade_register__(...args) {
   __facade_middleware__.push(...args.flat());
 }
 __name(__facade_register__, "__facade_register__");
+__name2(__facade_register__, "__facade_register__");
 function __facade_invokeChain__(request, env, ctx, dispatch, middlewareChain) {
   const [head, ...tail] = middlewareChain;
   const middlewareCtx = {
@@ -1283,6 +1505,7 @@ function __facade_invokeChain__(request, env, ctx, dispatch, middlewareChain) {
   return head(request, env, ctx, middlewareCtx);
 }
 __name(__facade_invokeChain__, "__facade_invokeChain__");
+__name2(__facade_invokeChain__, "__facade_invokeChain__");
 function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
   return __facade_invokeChain__(request, env, ctx, dispatch, [
     ...__facade_middleware__,
@@ -1290,16 +1513,18 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
   ]);
 }
 __name(__facade_invoke__, "__facade_invoke__");
-
-// ../.wrangler/tmp/bundle-xXJVhp/middleware-loader.entry.ts
+__name2(__facade_invoke__, "__facade_invoke__");
 var __Facade_ScheduledController__ = class ___Facade_ScheduledController__ {
+  static {
+    __name(this, "___Facade_ScheduledController__");
+  }
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
     this.cron = cron;
     this.#noRetry = noRetry;
   }
   static {
-    __name(this, "__Facade_ScheduledController__");
+    __name2(this, "__Facade_ScheduledController__");
   }
   #noRetry;
   noRetry() {
@@ -1316,7 +1541,7 @@ function wrapExportedHandler(worker) {
   for (const middleware of __INTERNAL_WRANGLER_MIDDLEWARE__) {
     __facade_register__(middleware);
   }
-  const fetchDispatcher = /* @__PURE__ */ __name(function(request, env, ctx) {
+  const fetchDispatcher = /* @__PURE__ */ __name2(function(request, env, ctx) {
     if (worker.fetch === void 0) {
       throw new Error("Handler does not export a fetch() function.");
     }
@@ -1325,7 +1550,7 @@ function wrapExportedHandler(worker) {
   return {
     ...worker,
     fetch(request, env, ctx) {
-      const dispatcher = /* @__PURE__ */ __name(function(type, init) {
+      const dispatcher = /* @__PURE__ */ __name2(function(type, init) {
         if (type === "scheduled" && worker.scheduled !== void 0) {
           const controller = new __Facade_ScheduledController__(
             Date.now(),
@@ -1341,6 +1566,7 @@ function wrapExportedHandler(worker) {
   };
 }
 __name(wrapExportedHandler, "wrapExportedHandler");
+__name2(wrapExportedHandler, "wrapExportedHandler");
 function wrapWorkerEntrypoint(klass) {
   if (__INTERNAL_WRANGLER_MIDDLEWARE__ === void 0 || __INTERNAL_WRANGLER_MIDDLEWARE__.length === 0) {
     return klass;
@@ -1349,7 +1575,7 @@ function wrapWorkerEntrypoint(klass) {
     __facade_register__(middleware);
   }
   return class extends klass {
-    #fetchDispatcher = /* @__PURE__ */ __name((request, env, ctx) => {
+    #fetchDispatcher = /* @__PURE__ */ __name2((request, env, ctx) => {
       this.env = env;
       this.ctx = ctx;
       if (super.fetch === void 0) {
@@ -1357,7 +1583,7 @@ function wrapWorkerEntrypoint(klass) {
       }
       return super.fetch(request);
     }, "#fetchDispatcher");
-    #dispatcher = /* @__PURE__ */ __name((type, init) => {
+    #dispatcher = /* @__PURE__ */ __name2((type, init) => {
       if (type === "scheduled" && super.scheduled !== void 0) {
         const controller = new __Facade_ScheduledController__(
           Date.now(),
@@ -1380,6 +1606,7 @@ function wrapWorkerEntrypoint(klass) {
   };
 }
 __name(wrapWorkerEntrypoint, "wrapWorkerEntrypoint");
+__name2(wrapWorkerEntrypoint, "wrapWorkerEntrypoint");
 var WRAPPED_ENTRY;
 if (typeof middleware_insertion_facade_default === "object") {
   WRAPPED_ENTRY = wrapExportedHandler(middleware_insertion_facade_default);
@@ -1387,8 +1614,178 @@ if (typeof middleware_insertion_facade_default === "object") {
   WRAPPED_ENTRY = wrapWorkerEntrypoint(middleware_insertion_facade_default);
 }
 var middleware_loader_entry_default = WRAPPED_ENTRY;
-export {
-  __INTERNAL_WRANGLER_MIDDLEWARE__,
-  middleware_loader_entry_default as default
+
+// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts
+var drainBody2 = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+  try {
+    return await middlewareCtx.next(request, env);
+  } finally {
+    try {
+      if (request.body !== null && !request.bodyUsed) {
+        const reader = request.body.getReader();
+        while (!(await reader.read()).done) {
+        }
+      }
+    } catch (e) {
+      console.error("Failed to drain the unused request body.", e);
+    }
+  }
+}, "drainBody");
+var middleware_ensure_req_body_drained_default2 = drainBody2;
+
+// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/middleware-miniflare3-json-error.ts
+function reduceError2(e) {
+  return {
+    name: e?.name,
+    message: e?.message ?? String(e),
+    stack: e?.stack,
+    cause: e?.cause === void 0 ? void 0 : reduceError2(e.cause)
+  };
+}
+__name(reduceError2, "reduceError");
+var jsonError2 = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx) => {
+  try {
+    return await middlewareCtx.next(request, env);
+  } catch (e) {
+    const error = reduceError2(e);
+    return Response.json(error, {
+      status: 500,
+      headers: { "MF-Experimental-Error-Stack": "true" }
+    });
+  }
+}, "jsonError");
+var middleware_miniflare3_json_error_default2 = jsonError2;
+
+// .wrangler/tmp/bundle-kOuRoP/middleware-insertion-facade.js
+var __INTERNAL_WRANGLER_MIDDLEWARE__2 = [
+  middleware_ensure_req_body_drained_default2,
+  middleware_miniflare3_json_error_default2
+];
+var middleware_insertion_facade_default2 = middleware_loader_entry_default;
+
+// C:/Users/marti/AppData/Roaming/npm/node_modules/wrangler/templates/middleware/common.ts
+var __facade_middleware__2 = [];
+function __facade_register__2(...args) {
+  __facade_middleware__2.push(...args.flat());
+}
+__name(__facade_register__2, "__facade_register__");
+function __facade_invokeChain__2(request, env, ctx, dispatch, middlewareChain) {
+  const [head, ...tail] = middlewareChain;
+  const middlewareCtx = {
+    dispatch,
+    next(newRequest, newEnv) {
+      return __facade_invokeChain__2(newRequest, newEnv, ctx, dispatch, tail);
+    }
+  };
+  return head(request, env, ctx, middlewareCtx);
+}
+__name(__facade_invokeChain__2, "__facade_invokeChain__");
+function __facade_invoke__2(request, env, ctx, dispatch, finalMiddleware) {
+  return __facade_invokeChain__2(request, env, ctx, dispatch, [
+    ...__facade_middleware__2,
+    finalMiddleware
+  ]);
+}
+__name(__facade_invoke__2, "__facade_invoke__");
+
+// .wrangler/tmp/bundle-kOuRoP/middleware-loader.entry.ts
+var __Facade_ScheduledController__2 = class ___Facade_ScheduledController__2 {
+  constructor(scheduledTime, cron, noRetry) {
+    this.scheduledTime = scheduledTime;
+    this.cron = cron;
+    this.#noRetry = noRetry;
+  }
+  static {
+    __name(this, "__Facade_ScheduledController__");
+  }
+  #noRetry;
+  noRetry() {
+    if (!(this instanceof ___Facade_ScheduledController__2)) {
+      throw new TypeError("Illegal invocation");
+    }
+    this.#noRetry();
+  }
 };
-//# sourceMappingURL=functionsWorker-0.13444873331498464.mjs.map
+function wrapExportedHandler2(worker) {
+  if (__INTERNAL_WRANGLER_MIDDLEWARE__2 === void 0 || __INTERNAL_WRANGLER_MIDDLEWARE__2.length === 0) {
+    return worker;
+  }
+  for (const middleware of __INTERNAL_WRANGLER_MIDDLEWARE__2) {
+    __facade_register__2(middleware);
+  }
+  const fetchDispatcher = /* @__PURE__ */ __name(function(request, env, ctx) {
+    if (worker.fetch === void 0) {
+      throw new Error("Handler does not export a fetch() function.");
+    }
+    return worker.fetch(request, env, ctx);
+  }, "fetchDispatcher");
+  return {
+    ...worker,
+    fetch(request, env, ctx) {
+      const dispatcher = /* @__PURE__ */ __name(function(type, init) {
+        if (type === "scheduled" && worker.scheduled !== void 0) {
+          const controller = new __Facade_ScheduledController__2(
+            Date.now(),
+            init.cron ?? "",
+            () => {
+            }
+          );
+          return worker.scheduled(controller, env, ctx);
+        }
+      }, "dispatcher");
+      return __facade_invoke__2(request, env, ctx, dispatcher, fetchDispatcher);
+    }
+  };
+}
+__name(wrapExportedHandler2, "wrapExportedHandler");
+function wrapWorkerEntrypoint2(klass) {
+  if (__INTERNAL_WRANGLER_MIDDLEWARE__2 === void 0 || __INTERNAL_WRANGLER_MIDDLEWARE__2.length === 0) {
+    return klass;
+  }
+  for (const middleware of __INTERNAL_WRANGLER_MIDDLEWARE__2) {
+    __facade_register__2(middleware);
+  }
+  return class extends klass {
+    #fetchDispatcher = /* @__PURE__ */ __name((request, env, ctx) => {
+      this.env = env;
+      this.ctx = ctx;
+      if (super.fetch === void 0) {
+        throw new Error("Entrypoint class does not define a fetch() function.");
+      }
+      return super.fetch(request);
+    }, "#fetchDispatcher");
+    #dispatcher = /* @__PURE__ */ __name((type, init) => {
+      if (type === "scheduled" && super.scheduled !== void 0) {
+        const controller = new __Facade_ScheduledController__2(
+          Date.now(),
+          init.cron ?? "",
+          () => {
+          }
+        );
+        return super.scheduled(controller);
+      }
+    }, "#dispatcher");
+    fetch(request) {
+      return __facade_invoke__2(
+        request,
+        this.env,
+        this.ctx,
+        this.#dispatcher,
+        this.#fetchDispatcher
+      );
+    }
+  };
+}
+__name(wrapWorkerEntrypoint2, "wrapWorkerEntrypoint");
+var WRAPPED_ENTRY2;
+if (typeof middleware_insertion_facade_default2 === "object") {
+  WRAPPED_ENTRY2 = wrapExportedHandler2(middleware_insertion_facade_default2);
+} else if (typeof middleware_insertion_facade_default2 === "function") {
+  WRAPPED_ENTRY2 = wrapWorkerEntrypoint2(middleware_insertion_facade_default2);
+}
+var middleware_loader_entry_default2 = WRAPPED_ENTRY2;
+export {
+  __INTERNAL_WRANGLER_MIDDLEWARE__2 as __INTERNAL_WRANGLER_MIDDLEWARE__,
+  middleware_loader_entry_default2 as default
+};
+//# sourceMappingURL=functionsWorker-0.23648109127607508.js.map

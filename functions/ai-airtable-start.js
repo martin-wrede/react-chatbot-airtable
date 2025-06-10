@@ -1,4 +1,6 @@
 // functions/ai-airtable.js
+// prompt, TC, Filenumber
+// ohne botanswer
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -79,6 +81,15 @@ export async function onRequest(context) {
           },
         }
       );
+    }
+
+    // ✅ Save to Airtable (only save user prompts, not file content)
+    try {
+      await saveToAirtable(env, message, files);
+      console.log("Successfully saved to Airtable");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+      // Continue with AI response even if Airtable fails
     }
 
     // ✅ Enhanced system prompt for file handling
@@ -167,20 +178,9 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     const data = await apiResponse.json();
     console.log("OpenAI Response received successfully");
     
-    // Get the AI response content
-    const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
-    
     // Log if the response mentions files
-    console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
-
-    // ✅ Save to Airtable with both prompt and bot answer
-    try {
-      await saveToAirtable(env, message, botAnswer, files);
-      console.log("Successfully saved to Airtable with bot answer");
-    } catch (airtableError) {
-      console.error("Airtable save failed:", airtableError);
-      // Continue with AI response even if Airtable fails
-    }
+    const responseContent = data.choices?.[0]?.message?.content || "";
+    console.log("Response mentions files:", responseContent.toLowerCase().includes("datei"));
 
     return new Response(JSON.stringify(data), {
       status: 200,
@@ -208,8 +208,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
   }
 }
 
-// ✅ Enhanced Airtable Integration Function with Bot Answer
-async function saveToAirtable(env, originalMessage, botAnswer, files) {
+// ✅ Airtable Integration Function
+async function saveToAirtable(env, originalMessage, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
@@ -226,9 +226,6 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
     userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
   }
 
-  // Clean up bot answer - remove any potential formatting issues
-  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, '\n').trim();
-
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   
   const recordData = {
@@ -236,13 +233,10 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
       {
         fields: {
           "Prompt": userPrompt,
-          "Bot_Answer": cleanBotAnswer,
-          "Timestamp": new Date().toISOString(),
-          // Optional: Add metadata fields
-      //    "Has_Files": files.length > 0,
-          "File_Count": files.length,
-       //   "Response_Length": cleanBotAnswer.length,
-       //   "Prompt_Length": userPrompt.length
+          
+         "Timestamp": new Date().toISOString(),
+       //   "Has_Files": files.length > 0,
+        "File_Count": files.length
         }
       }
     ]
@@ -251,7 +245,6 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
   console.log("Saving to Airtable:", {
     url: airtableUrl,
     promptLength: userPrompt.length,
-    botAnswerLength: cleanBotAnswer.length,
     hasFiles: files.length > 0
   });
 
@@ -273,92 +266,4 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
   const result = await response.json();
   console.log("Airtable save successful:", result);
   return result;
-}
-
-// ✅ Optional: Function to update an existing record with bot answer
-async function updateAirtableRecord(env, recordId, botAnswer) {
-  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
-  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
-  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
-
-  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
-    throw new Error("Missing Airtable credentials");
-  }
-
-  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${recordId}`;
-  
-  const updateData = {
-    fields: {
-      "Bot Answer": botAnswer,
-      "Response_Length": botAnswer.length,
-      "Updated_At": new Date().toISOString()
-    }
-  };
-
-  const response = await fetch(airtableUrl, {
-    method: "PATCH",
-    headers: {
-      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(updateData),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Airtable Update Error:", response.status, errorText);
-    throw new Error(`Airtable Update Error: ${response.status} - ${errorText}`);
-  }
-
-  const result = await response.json();
-  console.log("Airtable update successful:", result);
-  return result;
-}
-
-// ✅ Optional: Function to retrieve chat history from Airtable
-async function getChatHistory(env, maxRecords = 100) {
-  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
-  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
-  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
-
-  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
-    throw new Error("Missing Airtable credentials");
-  }
-
-  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
-  
-  const params = new URLSearchParams({
-    maxRecords: maxRecords.toString(),
-    sort: JSON.stringify([{ field: "Timestamp", direction: "desc" }]),
-  });
-
-  const response = await fetch(`${airtableUrl}?${params}`, {
-    method: "GET",
-    headers: {
-      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error("Airtable Fetch Error:", response.status, errorText);
-    throw new Error(`Airtable Fetch Error: ${response.status} - ${errorText}`);
-  }
-
-  const result = await response.json();
-  console.log(`Retrieved ${result.records.length} records from Airtable`);
-  
-  // Format the records for easier use
-  const formattedRecords = result.records.map(record => ({
-    id: record.id,
-    prompt: record.fields.Prompt,
-    botAnswer: record.fields['Bot Answer'],
-    timestamp: record.fields.Timestamp,
-    hasFiles: record.fields.Has_Files || false,
-    fileCount: record.fields.File_Count || 0,
-    createdTime: record.createdTime
-  }));
-  
-  return formattedRecords;
 }
