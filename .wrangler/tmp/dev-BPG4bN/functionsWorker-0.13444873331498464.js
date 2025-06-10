@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-Fyjhcx/checked-fetch.js
+// .wrangler/tmp/bundle-XB9UoA/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -27,7 +27,7 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
-// .wrangler/tmp/pages-YXkEAD/functionsWorker-0.06397871988115411.mjs
+// .wrangler/tmp/pages-76HKgf/functionsWorker-0.13444873331498464.mjs
 var __defProp2 = Object.defineProperty;
 var __name2 = /* @__PURE__ */ __name((target, value) => __defProp2(target, "name", { value, configurable: true }), "__name");
 var urls2 = /* @__PURE__ */ new Set();
@@ -246,9 +246,9 @@ async function saveToAirtable(env, originalMessage, files) {
       {
         fields: {
           "Prompt": userPrompt,
-          "Timestamp": (/* @__PURE__ */ new Date()).toISOString()
+          "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
           //   "Has_Files": files.length > 0,
-          //    "File_Count": files.length
+          "File_Count": files.length
         }
       }
     ]
@@ -277,6 +277,505 @@ async function saveToAirtable(env, originalMessage, files) {
 }
 __name(saveToAirtable, "saveToAirtable");
 __name2(saveToAirtable, "saveToAirtable");
+async function onRequest2(context) {
+  const { request, env } = context;
+  console.log("=== AI Function Called ===");
+  console.log("Method:", request.method);
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    });
+  }
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: `Method ${request.method} not allowed` }), {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+  try {
+    const body = await request.text();
+    console.log("Raw request body length:", body.length);
+    if (!body) {
+      return new Response(
+        JSON.stringify({ error: "Empty request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    let parsedBody;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch (e) {
+      console.error("JSON Parse Error:", e);
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON in request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    console.log("Request contains files:", parsedBody.files?.length || 0);
+    console.log("Message length:", parsedBody.message?.length || 0);
+    const { message, messages = [], files = [] } = parsedBody;
+    if (!message) {
+      return new Response(
+        JSON.stringify({ error: "Missing 'message' field" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    let systemPrompt = "Du bist ein hilfsreicher AI-Assistent. Antworte h\xF6flich und informativ auf Deutsch.";
+    if (files.length > 0) {
+      systemPrompt += ` 
+      
+WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Dateien sind im Nachrichteninhalt unter "[Uploaded Files Context:]" zu finden. 
+- Lies und analysiere den Inhalt dieser Dateien sorgf\xE4ltig
+- Beziehe dich direkt auf den Dateiinhalt in deinen Antworten
+- Wenn der Benutzer Fragen zu den Dateien stellt, zitiere relevante Teile daraus
+- Best\xE4tige explizit, dass du die Dateien gelesen hast`;
+    }
+    const chatMessages = [
+      {
+        role: "system",
+        content: systemPrompt
+      }
+    ];
+    if (messages.length > 0) {
+      const historyMessages = messages.slice(0, -1).map((msg) => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      chatMessages.push(...historyMessages);
+    }
+    chatMessages.push({
+      role: "user",
+      content: message
+    });
+    console.log("=== DEBUG: Final message to OpenAI ===");
+    console.log("System prompt:", systemPrompt);
+    console.log("Total messages:", chatMessages.length);
+    console.log("Current message preview:", message.substring(0, 500) + "...");
+    console.log("=====================================");
+    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.VITE_APP_OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo",
+        messages: chatMessages,
+        max_tokens: files.length > 0 ? 2e3 : 1e3,
+        // More tokens when files are involved
+        temperature: 0.7
+      })
+    });
+    if (!apiResponse.ok) {
+      const errorText = await apiResponse.text();
+      console.error("OpenAI API Error:", apiResponse.status, errorText);
+      if (errorText.includes("context_length_exceeded")) {
+        return new Response(JSON.stringify({
+          error: "Die hochgeladenen Dateien sind zu gro\xDF. Bitte verwende kleinere Dateien oder teile sie auf.",
+          choices: [{
+            message: {
+              content: "Entschuldigung, die hochgeladenen Dateien sind zu gro\xDF f\xFCr die Verarbeitung. Bitte verwende kleinere Dateien oder teile sie in mehrere kleinere Dateien auf."
+            }
+          }]
+        }), {
+          status: 200,
+          // Return 200 so frontend handles it normally
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
+      throw new Error(`OpenAI API Error: ${apiResponse.status} - ${errorText}`);
+    }
+    const data = await apiResponse.json();
+    console.log("OpenAI Response received successfully");
+    const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
+    console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
+    try {
+      await saveToAirtable2(env, message, botAnswer, files);
+      console.log("Successfully saved to Airtable with bot answer and file attachments");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+    }
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  } catch (error) {
+    console.error("Error in AI function:", error);
+    return new Response(JSON.stringify({
+      error: error.message,
+      choices: [{
+        message: {
+          content: "Entschuldigung, es gab einen technischen Fehler. Bitte versuche es erneut."
+        }
+      }]
+    }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+}
+__name(onRequest2, "onRequest2");
+__name2(onRequest2, "onRequest");
+function createFileDataURL(fileName, content) {
+  const base64Content = btoa(unescape(encodeURIComponent(content)));
+  return `data:text/plain;base64,${base64Content}`;
+}
+__name(createFileDataURL, "createFileDataURL");
+__name2(createFileDataURL, "createFileDataURL");
+async function saveToAirtable2(env, originalMessage, botAnswer, files) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  let userPrompt = originalMessage;
+  if (originalMessage.includes("[Uploaded Files Context:]")) {
+    userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
+  }
+  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, "\n").trim();
+  const fileAttachments = files.map((file) => ({
+    url: createFileDataURL(file.name, file.content),
+    filename: file.name,
+    type: "text/plain"
+  }));
+  console.log("Preparing file attachments:", fileAttachments.length);
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+  const recordData = {
+    records: [
+      {
+        fields: {
+          "Prompt": userPrompt,
+          "Bot Answer": cleanBotAnswer,
+          "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+          "File_Count": files.length
+          // Add file attachments if any exist
+          ///        ...(fileAttachments.length > 0 && {
+          ///         "File_Attachments": fileAttachments
+          ///       })
+        }
+      }
+    ]
+  };
+  console.log("Saving to Airtable:", {
+    url: airtableUrl,
+    promptLength: userPrompt.length,
+    botAnswerLength: cleanBotAnswer.length,
+    hasFiles: files.length > 0,
+    fileAttachments: fileAttachments.length
+  });
+  const response = await fetch(airtableUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(recordData)
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable API Error:", response.status, errorText);
+    if (response.status === 422 && files.length > 0) {
+      console.log("Retrying without file attachments...");
+      const fallbackData = {
+        records: [
+          {
+            fields: {
+              "Prompt": userPrompt,
+              "Bot Answer": cleanBotAnswer,
+              "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+              "File_Count": files.length,
+              // Add file names as text instead of attachments
+              "File_Names": files.map((f) => f.name).join(", ")
+            }
+          }
+        ]
+      };
+      const fallbackResponse = await fetch(airtableUrl, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(fallbackData)
+      });
+      if (fallbackResponse.ok) {
+        const fallbackResult = await fallbackResponse.json();
+        console.log("Airtable save successful (without file attachments):", fallbackResult);
+        return fallbackResult;
+      }
+    }
+    throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable save successful:", result);
+  return result;
+}
+__name(saveToAirtable2, "saveToAirtable2");
+__name2(saveToAirtable2, "saveToAirtable");
+async function onRequest3(context) {
+  const { request, env } = context;
+  console.log("=== AI Function Called ===");
+  console.log("Method:", request.method);
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    });
+  }
+  if (request.method !== "POST") {
+    return new Response(JSON.stringify({ error: `Method ${request.method} not allowed` }), {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+  try {
+    const body = await request.text();
+    console.log("Raw request body length:", body.length);
+    if (!body) {
+      return new Response(
+        JSON.stringify({ error: "Empty request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    let parsedBody;
+    try {
+      parsedBody = JSON.parse(body);
+    } catch (e) {
+      console.error("JSON Parse Error:", e);
+      return new Response(
+        JSON.stringify({ error: "Invalid JSON in request body" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    console.log("Request contains files:", parsedBody.files?.length || 0);
+    console.log("Message length:", parsedBody.message?.length || 0);
+    const { message, messages = [], files = [] } = parsedBody;
+    if (!message) {
+      return new Response(
+        JSON.stringify({ error: "Missing 'message' field" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        }
+      );
+    }
+    let systemPrompt = "Du bist ein hilfsreicher AI-Assistent. Antworte h\xF6flich und informativ auf Deutsch.";
+    if (files.length > 0) {
+      systemPrompt += ` 
+      
+WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Dateien sind im Nachrichteninhalt unter "[Uploaded Files Context:]" zu finden. 
+- Lies und analysiere den Inhalt dieser Dateien sorgf\xE4ltig
+- Beziehe dich direkt auf den Dateiinhalt in deinen Antworten
+- Wenn der Benutzer Fragen zu den Dateien stellt, zitiere relevante Teile daraus
+- Best\xE4tige explizit, dass du die Dateien gelesen hast`;
+    }
+    const chatMessages = [
+      {
+        role: "system",
+        content: systemPrompt
+      }
+    ];
+    if (messages.length > 0) {
+      const historyMessages = messages.slice(0, -1).map((msg) => ({
+        role: msg.role,
+        content: msg.content
+      }));
+      chatMessages.push(...historyMessages);
+    }
+    chatMessages.push({
+      role: "user",
+      content: message
+    });
+    console.log("=== DEBUG: Final message to OpenAI ===");
+    console.log("System prompt:", systemPrompt);
+    console.log("Total messages:", chatMessages.length);
+    console.log("Current message preview:", message.substring(0, 500) + "...");
+    console.log("=====================================");
+    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.VITE_APP_OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "gpt-3.5-turbo",
+        messages: chatMessages,
+        max_tokens: files.length > 0 ? 2e3 : 1e3,
+        // More tokens when files are involved
+        temperature: 0.7
+      })
+    });
+    if (!apiResponse.ok) {
+      const errorText = await apiResponse.text();
+      console.error("OpenAI API Error:", apiResponse.status, errorText);
+      if (errorText.includes("context_length_exceeded")) {
+        return new Response(JSON.stringify({
+          error: "Die hochgeladenen Dateien sind zu gro\xDF. Bitte verwende kleinere Dateien oder teile sie auf.",
+          choices: [{
+            message: {
+              content: "Entschuldigung, die hochgeladenen Dateien sind zu gro\xDF f\xFCr die Verarbeitung. Bitte verwende kleinere Dateien oder teile sie in mehrere kleinere Dateien auf."
+            }
+          }]
+        }), {
+          status: 200,
+          // Return 200 so frontend handles it normally
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+          }
+        });
+      }
+      throw new Error(`OpenAI API Error: ${apiResponse.status} - ${errorText}`);
+    }
+    const data = await apiResponse.json();
+    console.log("OpenAI Response received successfully");
+    const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
+    console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
+    try {
+      await saveToAirtable3(env, message, botAnswer, files);
+      console.log("Successfully saved to Airtable with bot answer");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+    }
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  } catch (error) {
+    console.error("Error in AI function:", error);
+    return new Response(JSON.stringify({
+      error: error.message,
+      choices: [{
+        message: {
+          content: "Entschuldigung, es gab einen technischen Fehler. Bitte versuche es erneut."
+        }
+      }]
+    }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*"
+      }
+    });
+  }
+}
+__name(onRequest3, "onRequest3");
+__name2(onRequest3, "onRequest");
+async function saveToAirtable3(env, originalMessage, botAnswer, files) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  let userPrompt = originalMessage;
+  if (originalMessage.includes("[Uploaded Files Context:]")) {
+    userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
+  }
+  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, "\n").trim();
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+  const recordData = {
+    records: [
+      {
+        fields: {
+          "Prompt": userPrompt,
+          "Bot Answer": cleanBotAnswer,
+          "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+          // Optional: Add metadata fields
+          //    "Has_Files": files.length > 0,
+          "File_Count": files.length
+          //   "Response_Length": cleanBotAnswer.length,
+          //   "Prompt_Length": userPrompt.length
+        }
+      }
+    ]
+  };
+  console.log("Saving to Airtable:", {
+    url: airtableUrl,
+    promptLength: userPrompt.length,
+    botAnswerLength: cleanBotAnswer.length,
+    hasFiles: files.length > 0
+  });
+  const response = await fetch(airtableUrl, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(recordData)
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable API Error:", response.status, errorText);
+    throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable save successful:", result);
+  return result;
+}
+__name(saveToAirtable3, "saveToAirtable3");
+__name2(saveToAirtable3, "saveToAirtable");
 var routes = [
   {
     routePath: "/ai-airtable",
@@ -284,6 +783,20 @@ var routes = [
     method: "",
     middlewares: [],
     modules: [onRequest]
+  },
+  {
+    routePath: "/ai-airtable copy 2",
+    mountPath: "/",
+    method: "",
+    middlewares: [],
+    modules: [onRequest2]
+  },
+  {
+    routePath: "/ai-airtable-bestversion",
+    mountPath: "/",
+    method: "",
+    middlewares: [],
+    modules: [onRequest3]
   }
 ];
 function lexer(str) {
@@ -951,7 +1464,7 @@ var jsonError2 = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default2 = jsonError2;
 
-// .wrangler/tmp/bundle-Fyjhcx/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-XB9UoA/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__2 = [
   middleware_ensure_req_body_drained_default2,
   middleware_miniflare3_json_error_default2
@@ -983,7 +1496,7 @@ function __facade_invoke__2(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__2, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-Fyjhcx/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-XB9UoA/middleware-loader.entry.ts
 var __Facade_ScheduledController__2 = class ___Facade_ScheduledController__2 {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
@@ -1083,4 +1596,4 @@ export {
   __INTERNAL_WRANGLER_MIDDLEWARE__2 as __INTERNAL_WRANGLER_MIDDLEWARE__,
   middleware_loader_entry_default2 as default
 };
-//# sourceMappingURL=functionsWorker-0.06397871988115411.js.map
+//# sourceMappingURL=functionsWorker-0.13444873331498464.js.map
