@@ -29,9 +29,8 @@ function App() {
     try {
       // Send conversation history with file context included
       const conversationHistory = [...messages, userMessage];
-    
-      //    const response = await fetch('/ai', {
-      const response = await fetch('/ai', {
+      
+      const response = await fetch('/ai-airtable', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

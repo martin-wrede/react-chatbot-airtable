@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-kOuRoP/checked-fetch.js
+// .wrangler/tmp/bundle-n9rMEg/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -27,7 +27,7 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
-// .wrangler/tmp/pages-Ao1XNS/functionsWorker-0.23648109127607508.mjs
+// .wrangler/tmp/pages-XcTOjt/functionsWorker-0.13142374365704934.mjs
 var __defProp2 = Object.defineProperty;
 var __name2 = /* @__PURE__ */ __name((target, value) => __defProp2(target, "name", { value, configurable: true }), "__name");
 var urls2 = /* @__PURE__ */ new Set();
@@ -110,6 +110,7 @@ async function onRequest(context) {
       );
     }
     console.log("Request contains files:", parsedBody.files?.length || 0);
+    console.log("Request contains file attachments:", parsedBody.fileAttachments?.length || 0);
     console.log("Message length:", parsedBody.message?.length || 0);
     const { message, messages = [], files = [] } = parsedBody;
     if (!message) {
@@ -197,8 +198,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
     console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
     try {
-      await saveToAirtable(env, message, botAnswer, files);
-      console.log("Successfully saved to Airtable with bot answer and file attachments");
+      await saveToAirtable(env, message, botAnswer, files, parsedBody.fileAttachments);
+      console.log("Successfully saved to Airtable with bot answer");
     } catch (airtableError) {
       console.error("Airtable save failed:", airtableError);
     }
@@ -229,13 +230,7 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
 }
 __name(onRequest, "onRequest");
 __name2(onRequest, "onRequest");
-function createFileDataURL(fileName, content) {
-  const base64Content = btoa(unescape(encodeURIComponent(content)));
-  return `data:text/plain;base64,${base64Content}`;
-}
-__name(createFileDataURL, "createFileDataURL");
-__name2(createFileDataURL, "createFileDataURL");
-async function saveToAirtable(env, originalMessage, botAnswer, files) {
+async function saveToAirtable(env, originalMessage, botAnswer, files, fileAttachments = []) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
@@ -247,35 +242,43 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
     userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
   }
   const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, "\n").trim();
-  const fileAttachments = files.map((file) => ({
-    url: createFileDataURL(file.name, file.content),
-    filename: file.name,
-    type: "text/plain"
-  }));
-  console.log("Preparing file attachments:", fileAttachments.length);
-  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
-  const recordData = {
-    records: [
-      {
-        fields: {
-          "Prompt": userPrompt,
-          "Bot_Answer": cleanBotAnswer,
-          "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
-          "File_Count": files.length,
-          // Add file attachments if any exist
-          ...fileAttachments.length > 0 && {
-            "File_Attachments": fileAttachments
-          }
-        }
+  let airtableAttachments = [];
+  if (fileAttachments && fileAttachments.length > 0) {
+    console.log("Processing file attachments:", fileAttachments.length);
+    for (const file of fileAttachments) {
+      try {
+        const base64Content = btoa(file.content);
+        const dataUrl = `data:${file.type || "text/plain"};base64,${base64Content}`;
+        const attachment = {
+          filename: file.name,
+          url: dataUrl
+        };
+        airtableAttachments.push(attachment);
+        console.log(`Prepared attachment: ${file.name} (${file.content.length} chars)`);
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
       }
-    ]
+    }
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+  const fields = {
+    "Prompt": userPrompt,
+    "Bot_Answer": cleanBotAnswer,
+    "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
+    "File_Count": files.length
+  };
+  if (airtableAttachments.length > 0) {
+    fields["File_Attachments"] = airtableAttachments;
+  }
+  const recordData = {
+    records: [{ fields }]
   };
   console.log("Saving to Airtable:", {
     url: airtableUrl,
     promptLength: userPrompt.length,
     botAnswerLength: cleanBotAnswer.length,
     hasFiles: files.length > 0,
-    fileAttachments: fileAttachments.length
+    hasAttachments: airtableAttachments.length > 0
   });
   const response = await fetch(airtableUrl, {
     method: "POST",
@@ -288,36 +291,6 @@ async function saveToAirtable(env, originalMessage, botAnswer, files) {
   if (!response.ok) {
     const errorText = await response.text();
     console.error("Airtable API Error:", response.status, errorText);
-    if (response.status === 422 && files.length > 0) {
-      console.log("Retrying without file attachments...");
-      const fallbackData = {
-        records: [
-          {
-            fields: {
-              "Prompt": userPrompt,
-              "Bot_Answer": cleanBotAnswer,
-              "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
-              "File_Count": files.length,
-              // Add file names as text instead of attachments
-              "File_Names": files.map((f) => f.name).join(", ")
-            }
-          }
-        ]
-      };
-      const fallbackResponse = await fetch(airtableUrl, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(fallbackData)
-      });
-      if (fallbackResponse.ok) {
-        const fallbackResult = await fallbackResponse.json();
-        console.log("Airtable save successful (without file attachments):", fallbackResult);
-        return fallbackResult;
-      }
-    }
     throw new Error(`Airtable API Error: ${response.status} - ${errorText}`);
   }
   const result = await response.json();
@@ -556,30 +529,124 @@ __name(saveToAirtable2, "saveToAirtable2");
 __name2(saveToAirtable2, "saveToAirtable");
 async function onRequest3(context) {
   const { request, env } = context;
-  console.log("=== AI Function Called ===");
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
+      }
+    });
+  }
+  if (request.method !== "POST") {
+    return new Response("Method Not Allowed", { status: 405 });
+  }
+  try {
+    const body = await request.json();
+    const { action, data } = body;
+    if (!action) {
+      return errorResponse("Missing 'action' field");
+    }
+    let result;
+    switch (action) {
+      case "save":
+        if (!data?.prompt) {
+          return errorResponse("Missing 'prompt' in data");
+        }
+        result = await saveToAirtable3(env, data);
+        break;
+      default:
+        return errorResponse(`Unsupported action: ${action}`);
+    }
+    return new Response(JSON.stringify({ success: true, data: result }), {
+      status: 200,
+      headers: corsHeaders()
+    });
+  } catch (err) {
+    console.error("Server error:", err);
+    return new Response(JSON.stringify({ error: err.message }), {
+      status: 500,
+      headers: corsHeaders()
+    });
+  }
+}
+__name(onRequest3, "onRequest3");
+__name2(onRequest3, "onRequest");
+function errorResponse(message) {
+  return new Response(JSON.stringify({ success: false, error: message }), {
+    status: 400,
+    headers: corsHeaders()
+  });
+}
+__name(errorResponse, "errorResponse");
+__name2(errorResponse, "errorResponse");
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Content-Type": "application/json"
+  };
+}
+__name(corsHeaders, "corsHeaders");
+__name2(corsHeaders, "corsHeaders");
+async function saveToAirtable3(env, data) {
+  const { prompt, botAnswer, files = [], fileAttachments = [] } = data;
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials in environment");
+  }
+  const cleanBotAnswer = botAnswer?.trim() || "No response";
+  const fileCount = files.length;
+  const attachments = fileAttachments.filter((file) => file.url).map((file) => ({
+    filename: file.name,
+    url: file.url
+  }));
+  const fields = {
+    Prompt: prompt,
+    Bot_Answer: cleanBotAnswer,
+    Timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    File_Count: fileCount
+  };
+  if (attachments.length > 0) {
+    fields["File_Attachments"] = attachments;
+  }
+  const response = await fetch(`https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ records: [{ fields }] })
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable API error:", errorText);
+    throw new Error(`Airtable error: ${response.status}`);
+  }
+  const result = await response.json();
+  console.log("Saved to Airtable:", result);
+  return result;
+}
+__name(saveToAirtable3, "saveToAirtable3");
+__name2(saveToAirtable3, "saveToAirtable");
+async function onRequest4(context) {
+  const { request, env } = context;
+  console.log("=== Airtable Function Called ===");
   console.log("Method:", request.method);
   if (request.method === "OPTIONS") {
     return new Response(null, {
       status: 204,
       headers: {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type"
-      }
-    });
-  }
-  if (request.method !== "POST") {
-    return new Response(JSON.stringify({ error: `Method ${request.method} not allowed` }), {
-      status: 405,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
       }
     });
   }
   try {
     const body = await request.text();
-    console.log("Raw request body length:", body.length);
     if (!body) {
       return new Response(
         JSON.stringify({ error: "Empty request body" }),
@@ -608,12 +675,10 @@ async function onRequest3(context) {
         }
       );
     }
-    console.log("Request contains files:", parsedBody.files?.length || 0);
-    console.log("Message length:", parsedBody.message?.length || 0);
-    const { message, messages = [], files = [] } = parsedBody;
-    if (!message) {
+    const { action, data } = parsedBody;
+    if (!action) {
       return new Response(
-        JSON.stringify({ error: "Missing 'message' field" }),
+        JSON.stringify({ error: "Missing 'action' field" }),
         {
           status: 400,
           headers: {
@@ -623,85 +688,85 @@ async function onRequest3(context) {
         }
       );
     }
-    try {
-      await saveToAirtable3(env, message, files);
-      console.log("Successfully saved to Airtable");
-    } catch (airtableError) {
-      console.error("Airtable save failed:", airtableError);
-    }
-    let systemPrompt = "Du bist ein hilfsreicher AI-Assistent. Antworte h\xF6flich und informativ auf Deutsch.";
-    if (files.length > 0) {
-      systemPrompt += ` 
-      
-WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Dateien sind im Nachrichteninhalt unter "[Uploaded Files Context:]" zu finden. 
-- Lies und analysiere den Inhalt dieser Dateien sorgf\xE4ltig
-- Beziehe dich direkt auf den Dateiinhalt in deinen Antworten
-- Wenn der Benutzer Fragen zu den Dateien stellt, zitiere relevante Teile daraus
-- Best\xE4tige explizit, dass du die Dateien gelesen hast`;
-    }
-    const chatMessages = [
-      {
-        role: "system",
-        content: systemPrompt
-      }
-    ];
-    if (messages.length > 0) {
-      const historyMessages = messages.slice(0, -1).map((msg) => ({
-        role: msg.role,
-        content: msg.content
-      }));
-      chatMessages.push(...historyMessages);
-    }
-    chatMessages.push({
-      role: "user",
-      content: message
-    });
-    console.log("=== DEBUG: Final message to OpenAI ===");
-    console.log("System prompt:", systemPrompt);
-    console.log("Total messages:", chatMessages.length);
-    console.log("Current message preview:", message.substring(0, 500) + "...");
-    console.log("=====================================");
-    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${env.VITE_APP_OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo",
-        messages: chatMessages,
-        max_tokens: files.length > 0 ? 2e3 : 1e3,
-        // More tokens when files are involved
-        temperature: 0.7
-      })
-    });
-    if (!apiResponse.ok) {
-      const errorText = await apiResponse.text();
-      console.error("OpenAI API Error:", apiResponse.status, errorText);
-      if (errorText.includes("context_length_exceeded")) {
-        return new Response(JSON.stringify({
-          error: "Die hochgeladenen Dateien sind zu gro\xDF. Bitte verwende kleinere Dateien oder teile sie auf.",
-          choices: [{
-            message: {
-              content: "Entschuldigung, die hochgeladenen Dateien sind zu gro\xDF f\xFCr die Verarbeitung. Bitte verwende kleinere Dateien oder teile sie in mehrere kleinere Dateien auf."
+    let result;
+    switch (action) {
+      case "save":
+        if (!data || !data.prompt) {
+          return new Response(
+            JSON.stringify({ error: "Missing required data for save action" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              }
             }
-          }]
-        }), {
-          status: 200,
-          // Return 200 so frontend handles it normally
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*"
+          );
+        }
+        result = await saveRecord(env, data.prompt, data.botAnswer, data.files || []);
+        break;
+      case "update":
+        if (!data || !data.recordId || !data.botAnswer) {
+          return new Response(
+            JSON.stringify({ error: "Missing required data for update action" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              }
+            }
+          );
+        }
+        result = await updateRecord(env, data.recordId, data.botAnswer);
+        break;
+      case "getChatHistory":
+        const maxRecords = data?.maxRecords || 100;
+        result = await getChatHistory(env, maxRecords);
+        break;
+      case "getRecord":
+        if (!data || !data.recordId) {
+          return new Response(
+            JSON.stringify({ error: "Missing recordId for getRecord action" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              }
+            }
+          );
+        }
+        result = await getRecord(env, data.recordId);
+        break;
+      case "deleteRecord":
+        if (!data || !data.recordId) {
+          return new Response(
+            JSON.stringify({ error: "Missing recordId for deleteRecord action" }),
+            {
+              status: 400,
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*"
+              }
+            }
+          );
+        }
+        result = await deleteRecord(env, data.recordId);
+        break;
+      default:
+        return new Response(
+          JSON.stringify({ error: `Unknown action: ${action}` }),
+          {
+            status: 400,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*"
+            }
           }
-        });
-      }
-      throw new Error(`OpenAI API Error: ${apiResponse.status} - ${errorText}`);
+        );
     }
-    const data = await apiResponse.json();
-    console.log("OpenAI Response received successfully");
-    const responseContent = data.choices?.[0]?.message?.content || "";
-    console.log("Response mentions files:", responseContent.toLowerCase().includes("datei"));
-    return new Response(JSON.stringify(data), {
+    return new Response(JSON.stringify({ success: true, data: result }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -709,14 +774,10 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
       }
     });
   } catch (error) {
-    console.error("Error in AI function:", error);
+    console.error("Error in Airtable function:", error);
     return new Response(JSON.stringify({
-      error: error.message,
-      choices: [{
-        message: {
-          content: "Entschuldigung, es gab einen technischen Fehler. Bitte versuche es erneut."
-        }
-      }]
+      success: false,
+      error: error.message
     }), {
       status: 500,
       headers: {
@@ -726,27 +787,24 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     });
   }
 }
-__name(onRequest3, "onRequest3");
-__name2(onRequest3, "onRequest");
-async function saveToAirtable3(env, originalMessage, files) {
+__name(onRequest4, "onRequest4");
+__name2(onRequest4, "onRequest");
+async function saveRecord(env, originalMessage, botAnswer, files) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
   if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
     throw new Error("Missing Airtable credentials");
   }
-  let userPrompt = originalMessage;
-  if (originalMessage.includes("[Uploaded Files Context:]")) {
-    userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
-  }
+  const cleanBotAnswer = botAnswer?.replace(/\n\s*\n/g, "\n").trim() || "No response generated";
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   const recordData = {
     records: [
       {
         fields: {
-          "Prompt": userPrompt,
+          "Prompt": originalMessage,
+          "Bot_Answer": cleanBotAnswer,
           "Timestamp": (/* @__PURE__ */ new Date()).toISOString(),
-          //   "Has_Files": files.length > 0,
           "File_Count": files.length
         }
       }
@@ -754,7 +812,8 @@ async function saveToAirtable3(env, originalMessage, files) {
   };
   console.log("Saving to Airtable:", {
     url: airtableUrl,
-    promptLength: userPrompt.length,
+    promptLength: originalMessage.length,
+    botAnswerLength: cleanBotAnswer.length,
     hasFiles: files.length > 0
   });
   const response = await fetch(airtableUrl, {
@@ -774,29 +833,170 @@ async function saveToAirtable3(env, originalMessage, files) {
   console.log("Airtable save successful:", result);
   return result;
 }
-__name(saveToAirtable3, "saveToAirtable3");
-__name2(saveToAirtable3, "saveToAirtable");
+__name(saveRecord, "saveRecord");
+__name2(saveRecord, "saveRecord");
+async function updateRecord(env, recordId, botAnswer) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${recordId}`;
+  const updateData = {
+    fields: {
+      "Bot_Answer": botAnswer,
+      "Response_Length": botAnswer.length,
+      "Updated_At": (/* @__PURE__ */ new Date()).toISOString()
+    }
+  };
+  const response = await fetch(airtableUrl, {
+    method: "PATCH",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(updateData)
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable Update Error:", response.status, errorText);
+    throw new Error(`Airtable Update Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable update successful:", result);
+  return result;
+}
+__name(updateRecord, "updateRecord");
+__name2(updateRecord, "updateRecord");
+async function getRecord(env, recordId) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${recordId}`;
+  const response = await fetch(airtableUrl, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    }
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable Fetch Error:", response.status, errorText);
+    throw new Error(`Airtable Fetch Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable fetch successful");
+  const formattedRecord = {
+    id: result.id,
+    prompt: result.fields.Prompt,
+    botAnswer: result.fields.Bot_Answer,
+    timestamp: result.fields.Timestamp,
+    hasFiles: result.fields.Has_Files || false,
+    fileCount: result.fields.File_Count || 0,
+    createdTime: result.createdTime
+  };
+  return formattedRecord;
+}
+__name(getRecord, "getRecord");
+__name2(getRecord, "getRecord");
+async function deleteRecord(env, recordId) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}/${recordId}`;
+  const response = await fetch(airtableUrl, {
+    method: "DELETE",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    }
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable Delete Error:", response.status, errorText);
+    throw new Error(`Airtable Delete Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log("Airtable delete successful:", result);
+  return result;
+}
+__name(deleteRecord, "deleteRecord");
+__name2(deleteRecord, "deleteRecord");
+async function getChatHistory(env, maxRecords = 100) {
+  const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
+  const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
+  const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
+  if (!AIRTABLE_API_KEY || !AIRTABLE_BASE_ID) {
+    throw new Error("Missing Airtable credentials");
+  }
+  const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
+  const params = new URLSearchParams({
+    maxRecords: maxRecords.toString(),
+    sort: JSON.stringify([{ field: "Timestamp", direction: "desc" }])
+  });
+  const response = await fetch(`${airtableUrl}?${params}`, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${AIRTABLE_API_KEY}`,
+      "Content-Type": "application/json"
+    }
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Airtable Fetch Error:", response.status, errorText);
+    throw new Error(`Airtable Fetch Error: ${response.status} - ${errorText}`);
+  }
+  const result = await response.json();
+  console.log(`Retrieved ${result.records.length} records from Airtable`);
+  const formattedRecords = result.records.map((record) => ({
+    id: record.id,
+    prompt: record.fields.Prompt,
+    botAnswer: record.fields.Bot_Answer,
+    timestamp: record.fields.Timestamp,
+    hasFiles: record.fields.Has_Files || false,
+    fileCount: record.fields.File_Count || 0,
+    createdTime: record.createdTime
+  }));
+  return formattedRecords;
+}
+__name(getChatHistory, "getChatHistory");
+__name2(getChatHistory, "getChatHistory");
 var routes = [
   {
-    routePath: "/ai-airtable",
+    routePath: "/ai",
     mountPath: "/",
     method: "",
     middlewares: [],
     modules: [onRequest]
   },
   {
-    routePath: "/ai-airtable-mitbotanswer",
+    routePath: "/ai-airtable",
     mountPath: "/",
     method: "",
     middlewares: [],
     modules: [onRequest2]
   },
   {
-    routePath: "/ai-airtable-start",
+    routePath: "/airtable",
     mountPath: "/",
     method: "",
     middlewares: [],
     modules: [onRequest3]
+  },
+  {
+    routePath: "/airtable copy",
+    mountPath: "/",
+    method: "",
+    middlewares: [],
+    modules: [onRequest4]
   }
 ];
 function lexer(str) {
@@ -1464,7 +1664,7 @@ var jsonError2 = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx
 }, "jsonError");
 var middleware_miniflare3_json_error_default2 = jsonError2;
 
-// .wrangler/tmp/bundle-kOuRoP/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-n9rMEg/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__2 = [
   middleware_ensure_req_body_drained_default2,
   middleware_miniflare3_json_error_default2
@@ -1496,7 +1696,7 @@ function __facade_invoke__2(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__2, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-kOuRoP/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-n9rMEg/middleware-loader.entry.ts
 var __Facade_ScheduledController__2 = class ___Facade_ScheduledController__2 {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;
@@ -1596,4 +1796,4 @@ export {
   __INTERNAL_WRANGLER_MIDDLEWARE__2 as __INTERNAL_WRANGLER_MIDDLEWARE__,
   middleware_loader_entry_default2 as default
 };
-//# sourceMappingURL=functionsWorker-0.23648109127607508.js.map
+//# sourceMappingURL=functionsWorker-0.13142374365704934.js.map

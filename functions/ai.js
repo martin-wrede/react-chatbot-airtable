@@ -1,6 +1,4 @@
-// functions/ai-airtable.js
-// prompt, TC, Filenumber
-// ohne botanswer
+// functions/ai.js
 
 export async function onRequest(context) {
   const { request, env } = context;
@@ -66,6 +64,7 @@ export async function onRequest(context) {
     }
 
     console.log("Request contains files:", parsedBody.files?.length || 0);
+    console.log("Request contains file attachments:", parsedBody.fileAttachments?.length || 0);
     console.log("Message length:", parsedBody.message?.length || 0);
     
     const { message, messages = [], files = [] } = parsedBody;
@@ -81,15 +80,6 @@ export async function onRequest(context) {
           },
         }
       );
-    }
-
-    // ✅ Save to Airtable (only save user prompts, not file content)
-    try {
-      await saveToAirtable(env, message, files);
-      console.log("Successfully saved to Airtable");
-    } catch (airtableError) {
-      console.error("Airtable save failed:", airtableError);
-      // Continue with AI response even if Airtable fails
     }
 
     // ✅ Enhanced system prompt for file handling
@@ -178,9 +168,20 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
     const data = await apiResponse.json();
     console.log("OpenAI Response received successfully");
     
+    // Get the AI response content
+    const botAnswer = data.choices?.[0]?.message?.content || "Entschuldigung, ich konnte keine Antwort generieren.";
+    
     // Log if the response mentions files
-    const responseContent = data.choices?.[0]?.message?.content || "";
-    console.log("Response mentions files:", responseContent.toLowerCase().includes("datei"));
+    console.log("Response mentions files:", botAnswer.toLowerCase().includes("datei"));
+
+    // ✅ Save to Airtable DIRECTLY (no HTTP calls)
+    try {
+      await saveToAirtable(env, message, botAnswer, files, parsedBody.fileAttachments);
+      console.log("Successfully saved to Airtable with bot answer");
+    } catch (airtableError) {
+      console.error("Airtable save failed:", airtableError);
+      // Continue with AI response even if Airtable fails
+    }
 
     return new Response(JSON.stringify(data), {
       status: 200,
@@ -208,8 +209,8 @@ WICHTIG: Der Benutzer hat ${files.length} Textdatei(en) hochgeladen. Diese Datei
   }
 }
 
-// ✅ Airtable Integration Function
-async function saveToAirtable(env, originalMessage, files) {
+// ✅ DIRECT Airtable Integration with File Attachments support
+async function saveToAirtable(env, originalMessage, botAnswer, files, fileAttachments = []) {
   const AIRTABLE_API_KEY = env.AIRTABLE_API_KEY;
   const AIRTABLE_BASE_ID = env.AIRTABLE_BASE_ID;
   const AIRTABLE_TABLE_NAME = env.AIRTABLE_TABLE_NAME || "Prompts";
@@ -226,26 +227,59 @@ async function saveToAirtable(env, originalMessage, files) {
     userPrompt = originalMessage.split("\n\n[Uploaded Files Context:]")[0];
   }
 
+  // Clean up bot answer - remove any potential formatting issues
+  const cleanBotAnswer = botAnswer.replace(/\n\s*\n/g, '\n').trim();
+
+  // Prepare file attachments for Airtable
+  let airtableAttachments = [];
+  
+  if (fileAttachments && fileAttachments.length > 0) {
+    console.log("Processing file attachments:", fileAttachments.length);
+    
+    for (const file of fileAttachments) {
+      try {
+        // Create a data URL for the file content
+        const base64Content = btoa(file.content);
+        const dataUrl = `data:${file.type || 'text/plain'};base64,${base64Content}`;
+        
+        // Airtable attachment format
+        const attachment = {
+          filename: file.name,
+          url: dataUrl
+        };
+        
+        airtableAttachments.push(attachment);
+        console.log(`Prepared attachment: ${file.name} (${file.content.length} chars)`);
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
+      }
+    }
+  }
+
   const airtableUrl = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${AIRTABLE_TABLE_NAME}`;
   
+  const fields = {
+    "Prompt": userPrompt,
+    "Bot_Answer": cleanBotAnswer,
+    "Timestamp": new Date().toISOString(),
+    "File_Count": files.length,
+  };
+
+  // Add file attachments if any
+  if (airtableAttachments.length > 0) {
+    fields["File_Attachments"] = airtableAttachments;
+  }
+
   const recordData = {
-    records: [
-      {
-        fields: {
-          "Prompt": userPrompt,
-          
-         "Timestamp": new Date().toISOString(),
-       //   "Has_Files": files.length > 0,
-        "File_Count": files.length
-        }
-      }
-    ]
+    records: [{ fields }]
   };
 
   console.log("Saving to Airtable:", {
     url: airtableUrl,
     promptLength: userPrompt.length,
-    hasFiles: files.length > 0
+    botAnswerLength: cleanBotAnswer.length,
+    hasFiles: files.length > 0,
+    hasAttachments: airtableAttachments.length > 0
   });
 
   const response = await fetch(airtableUrl, {
