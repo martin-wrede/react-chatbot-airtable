@@ -280,4 +280,9 @@
     align-self: flex-end;
     min-width: 120px;
   }
+
+    /* Adjust minimum height for mobile */
+  .chat-container {
+    min-height: 300px;
+  }
 }
