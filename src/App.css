@@ -23,6 +23,7 @@
   margin-bottom: 1rem;
   overflow-y: auto;
   background-color: #f9f9f9;
+  min-height:300px;
 }
 
 .empty-chat {
